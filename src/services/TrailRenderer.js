@@ -2,7 +2,7 @@ class TrailRenderer {
   constructor() {
     this.player1Trail = [];
     this.player2Trail = [];
-    this.maxTrailLength = 30;
+    this.maxTrailLength = 120;
   }
 
   addFrame(detections, settings = {}) {
