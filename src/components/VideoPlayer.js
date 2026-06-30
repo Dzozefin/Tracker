@@ -10,11 +10,14 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [isDetecting, setIsDetecting] = useState(false);
   const [detectionActive, setDetectionActive] = useState(false);
   const [player1Color, setPlayer1Color] = useState('#FF006E');
   const [player2Color, setPlayer2Color] = useState('#00D9FF');
   const [trailLength, setTrailLength] = useState(30);
+  const [manualMode, setManualMode] = useState(false);
+  const [player1Pos, setPlayer1Pos] = useState(null);
+  const [player2Pos, setPlayer2Pos] = useState(null);
+  const [calibrationMode, setCalibrationMode] = useState(false);
 
   const swordDetectorRef = useRef(new SwordDetector());
   const trailRendererRef = useRef(new TrailRenderer());
@@ -78,14 +81,22 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
       if (!video || !canvas) return;
 
       try {
-        // Draw video frame
         const ctx = canvas.getContext('2d');
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        // Detect sword tips
-        const detections = await swordDetectorRef.current.detect(video);
+        let detections;
 
-        // Render trails
+        if (manualMode && player1Pos && player2Pos) {
+          // Use manual positions
+          detections = {
+            player1: { x: player1Pos.x, y: player1Pos.y, score: 1.0 },
+            player2: { x: player2Pos.x, y: player2Pos.y, score: 1.0 }
+          };
+        } else {
+          // Use AI detection
+          detections = await swordDetectorRef.current.detect(video);
+        }
+
         trailRendererRef.current.addFrame(detections, {
           player1Color,
           player2Color,
@@ -93,6 +104,11 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
         });
 
         trailRendererRef.current.render(ctx, canvas.width, canvas.height);
+
+        // Draw calibration points if in manual mode
+        if (manualMode) {
+          drawCalibrationPoints(ctx);
+        }
       } catch (err) {
         console.error('Detection error:', err);
       }
@@ -107,7 +123,60 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [detectionActive, isPlaying, player1Color, player2Color, trailLength]);
+  }, [detectionActive, isPlaying, player1Color, player2Color, trailLength, manualMode, player1Pos, player2Pos]);
+
+  const drawCalibrationPoints = (ctx) => {
+    if (player1Pos) {
+      ctx.save();
+      ctx.fillStyle = player1Color;
+      ctx.beginPath();
+      ctx.arc(player1Pos.x, player1Pos.y, 15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#FFF';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = '#FFF';
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('P1', player1Pos.x, player1Pos.y + 25);
+      ctx.restore();
+    }
+
+    if (player2Pos) {
+      ctx.save();
+      ctx.fillStyle = player2Color;
+      ctx.beginPath();
+      ctx.arc(player2Pos.x, player2Pos.y, 15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#FFF';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = '#FFF';
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('P2', player2Pos.x, player2Pos.y + 25);
+      ctx.restore();
+    }
+  };
+
+  const handleCanvasClick = (e) => {
+    if (!calibrationMode) return;
+
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+    if (!player1Pos) {
+      setPlayer1Pos({ x, y });
+      alert('✅ Zawodnik 1 (LEWY) zaznaczony! Teraz kliknij na pozycję zawodnika 2 (PRAWY)');
+    } else if (!player2Pos) {
+      setPlayer2Pos({ x, y });
+      setCalibrationMode(false);
+      setManualMode(true);
+      alert('✅ Zawodnik 2 (PRAWY) zaznaczony! Kalibracja gotowa!');
+    }
+  };
 
   const togglePlayPause = () => {
     const video = videoRef.current;
@@ -120,14 +189,21 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
     }
   };
 
-  const handleCanvasClick = () => {
-    const video = videoRef.current;
-    if (video) {
-      // Slow down 10 seconds before this point
-      const newTime = Math.max(0, video.currentTime - 10);
-      video.currentTime = newTime;
-      setPlaybackSpeed(0.5);
+  const startCalibration = () => {
+    if (isPlaying) {
+      videoRef.current.pause();
     }
+    setCalibrationMode(true);
+    setPlayer1Pos(null);
+    setPlayer2Pos(null);
+    alert('🎯 KALIBRACJA:\n1. Kliknij na LEWEGO zawodnika\n2. Kliknij na PRAWEGO zawodnika\n\nKliknij na video aby zaznaczył zawodników!');
+  };
+
+  const resetCalibration = () => {
+    setPlayer1Pos(null);
+    setPlayer2Pos(null);
+    setCalibrationMode(false);
+    setManualMode(false);
   };
 
   const formatTime = (time) => {
@@ -140,7 +216,7 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
   return (
     <div className="video-player-container">
       <button className="btn-back" onClick={onBack}>
-        ← Back
+        ← Powrót
       </button>
 
       <div className="player-main">
@@ -152,11 +228,16 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
           />
           <canvas
             ref={canvasRef}
-            className="detection-canvas"
+            className={`detection-canvas ${calibrationMode ? 'calibration-mode' : ''}`}
             onClick={handleCanvasClick}
             width={1280}
             height={720}
           />
+          {calibrationMode && (
+            <div className="calibration-overlay">
+              🎯 Kliknij na zawodnika {player1Pos ? '2 (PRAWY)' : '1 (LEWY)'}
+            </div>
+          )}
         </div>
 
         <div className="controls-panel">
@@ -165,7 +246,7 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
               className="btn-control play-btn"
               onClick={togglePlayPause}
             >
-              {isPlaying ? '⏸ Pause' : '▶ Play'}
+              {isPlaying ? '⏸ Pauza' : '▶ Odtwarzaj'}
             </button>
 
             <div className="progress-bar">
@@ -188,7 +269,7 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
             </div>
 
             <div className="speed-control">
-              <label>Speed: {playbackSpeed.toFixed(1)}x</label>
+              <label>Prędkość: {playbackSpeed.toFixed(1)}x</label>
               <input
                 type="range"
                 min="0.25"
@@ -202,7 +283,7 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
           </div>
 
           <div className="settings-panel">
-            <h3>Trail Settings</h3>
+            <h3>⚙️ Ustawienia</h3>
 
             <div className="setting-group">
               <label className="checkbox-label">
@@ -211,12 +292,50 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
                   checked={detectionActive}
                   onChange={(e) => setDetectionActive(e.target.checked)}
                 />
-                <span>Enable Sword Detection</span>
+                <span>Włącz Detektowanie Szpady</span>
               </label>
             </div>
 
             <div className="setting-group">
-              <label>Player 1 Color (Left)</label>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={manualMode}
+                  onChange={(e) => setManualMode(e.target.checked)}
+                  disabled={!player1Pos || !player2Pos}
+                />
+                <span>Tryb Manual {player1Pos && player2Pos ? '✅' : '(kalibruj pierwszy)'}</span>
+              </label>
+            </div>
+
+            <div className="calibration-buttons">
+              <button 
+                className="btn-calibrate"
+                onClick={startCalibration}
+              >
+                🎯 Kalibruj Zawodników
+              </button>
+              {player1Pos && player2Pos && (
+                <button 
+                  className="btn-reset"
+                  onClick={resetCalibration}
+                >
+                  ↺ Reset Kalibracji
+                </button>
+              )}
+            </div>
+
+            {player1Pos && player2Pos && (
+              <div className="calibration-status">
+                ✅ P1: ({player1Pos.x.toFixed(0)}, {player1Pos.y.toFixed(0)})<br/>
+                ✅ P2: ({player2Pos.x.toFixed(0)}, {player2Pos.y.toFixed(0)})
+              </div>
+            )}
+
+            <hr />
+
+            <div className="setting-group">
+              <label>Kolor Zawodnika 1 (LEWY)</label>
               <div className="color-picker-group">
                 <input
                   type="color"
@@ -229,7 +348,7 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
             </div>
 
             <div className="setting-group">
-              <label>Player 2 Color (Right)</label>
+              <label>Kolor Zawodnika 2 (PRAWY)</label>
               <div className="color-picker-group">
                 <input
                   type="color"
@@ -242,7 +361,7 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
             </div>
 
             <div className="setting-group">
-              <label>Trail Length: {trailLength} frames</label>
+              <label>Długość Wstążki: {trailLength} klatek</label>
               <input
                 type="range"
                 min="5"
@@ -252,16 +371,12 @@ function VideoPlayer({ videoSource, videoType, onBack }) {
                 className="slider"
               />
             </div>
-
-            <button className="btn-export">
-              💾 Export Video with Trails
-            </button>
           </div>
         </div>
       </div>
 
       <div className="info-panel">
-        <p>💡 Click on canvas to slow down video 10 seconds before that moment</p>
+        <p>💡 Jeśli detekcja nie działa dobrze, użyj "Kalibruj Zawodników" aby ręcznie wskazać pozycje!</p>
       </div>
     </div>
   );
