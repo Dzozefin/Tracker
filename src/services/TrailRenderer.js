@@ -66,19 +66,25 @@ class TrailRenderer {
       const alpha = (i / trail.length) * 0.7;
 
       // Draw line segment
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 3 + (i / trail.length) * 5; // Thicker at end
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+     ctx.save();
 
-      ctx.beginPath();
-      ctx.moveTo(point.x, point.y);
-      ctx.lineTo(nextPoint.x, nextPoint.y);
-      ctx.stroke();
+ctx.strokeStyle = color;
+ctx.lineWidth = 5;
+ctx.lineCap = "round";
+ctx.lineJoin = "round";
 
-      ctx.restore();
+ctx.beginPath();
+
+ctx.moveTo(trail[0].x, trail[0].y);
+
+for (let i = 1; i < trail.length; i++) {
+    ctx.lineTo(trail[i].x, trail[i].y);
+}
+ctx.shadowBlur = 20;
+ctx.shadowColor = color;
+ctx.stroke();
+
+ctx.restore();
     }
 
     // Draw glow effect on trail
