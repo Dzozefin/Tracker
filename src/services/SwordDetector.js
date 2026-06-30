@@ -1,4 +1,5 @@
-import { PoseLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
+import * as poseDetection from '@tensorflow-models/pose-detection';
+import '@tensorflow/tfjs-backend-webgl';
 
 class SwordDetector {
   constructor() {
