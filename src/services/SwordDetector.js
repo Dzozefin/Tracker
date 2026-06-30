@@ -1,84 +1,90 @@
-import * as cocoSsd from '@tensorflow-models/coco-ssd';
+import { PoseLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 
 class SwordDetector {
   constructor() {
-    this.model = null;
-    this.isLoading = false;
+    this.landmarker = null;
+    this.initializing = false;
   }
 
   async loadModel() {
-    if (this.model) return;
-    if (this.isLoading) {
-      while (this.isLoading) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+    if (this.landmarker) return;
+
+    if (this.initializing) {
+      while (this.initializing) {
+        await new Promise(r => setTimeout(r, 50));
       }
       return;
     }
 
-    this.isLoading = true;
-    try {
-      console.log('Loading COCO-SSD model...');
-      this.model = await cocoSsd.load();
-      console.log('✅ COCO-SSD model loaded successfully');
-    } catch (err) {
-      console.error('❌ Failed to load detection model:', err);
-      this.isLoading = false;
-      throw err;
-    }
-    this.isLoading = false;
+    this.initializing = true;
+
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+    );
+
+    this.landmarker = await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath:
+          "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task"
+      },
+      runningMode: "VIDEO",
+      numPoses: 1
+    });
+
+    this.initializing = false;
+  }
+
+  estimateTip(wrist, elbow) {
+    if (!wrist || !elbow) return null;
+
+    const vx = wrist.x - elbow.x;
+    const vy = wrist.y - elbow.y;
+
+    // przedłużenie ręki = szpada
+    return {
+      x: wrist.x + vx * 1.8,
+      y: wrist.y + vy * 1.8,
+      score: 1
+    };
   }
 
   async detect(videoElement) {
     try {
       await this.loadModel();
 
-      if (!this.model || !videoElement) {
+      if (!this.landmarker || !videoElement) {
         return { player1: null, player2: null };
       }
 
-      const predictions = await this.model.estimateObjects(videoElement, 1);
+      const result = this.landmarker.detectForVideo(
+        videoElement,
+        performance.now()
+      );
 
-      if (!predictions || predictions.length === 0) {
+      const landmarks = result.landmarks?.[0];
+
+      if (!landmarks) {
         return { player1: null, player2: null };
       }
 
-      const videoWidth = videoElement.videoWidth || 1280;
-      const videoHeight = videoElement.videoHeight || 720;
+      // MediaPipe Pose keypoints:
+      // 15 = left wrist
+      // 13 = left elbow
+      // 16 = right wrist
+      // 14 = right elbow
 
-      const detections = predictions.filter(pred => {
-        if (!pred.bbox) return false;
-        
-        const width = pred.bbox[2];
-        const height = pred.bbox[3];
-        
-        const isThinElongated = (width < 150 && height > 50) || (height < 150 && width > 50);
-        return pred.score > 0.4 && isThinElongated;
-      });
+      const leftWrist = landmarks[15];
+      const leftElbow = landmarks[13];
 
-      const centerX = videoWidth / 2;
-      const leftDetections = detections.filter(d => d.bbox[0] + d.bbox[2]/2 < centerX);
-      const rightDetections = detections.filter(d => d.bbox[0] + d.bbox[2]/2 >= centerX);
+      const rightWrist = landmarks[16];
+      const rightElbow = landmarks[14];
 
-      const getTipPoint = (dets) => {
-        if (dets.length === 0) return null;
-        
-        const topmost = dets.reduce((min, d) => 
-          d.bbox[1] < min.bbox[1] ? d : min
-        );
+      const player1 = this.estimateTip(leftWrist, leftElbow);
+      const player2 = this.estimateTip(rightWrist, rightElbow);
 
-        return {
-          x: topmost.bbox[0] + topmost.bbox[2] / 2,
-          y: topmost.bbox[1],
-          score: topmost.score
-        };
-      };
-
-      return {
-        player1: getTipPoint(leftDetections),
-        player2: getTipPoint(rightDetections)
-      };
+      return { player1, player2 };
     } catch (err) {
-      console.error('Detection error:', err);
+      console.error("Pose detection error:", err);
       return { player1: null, player2: null };
     }
   }
